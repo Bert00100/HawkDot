@@ -1,10 +1,7 @@
 // =====================================================================
 // HawkDot agent — coleta de informações do SISTEMA (hardware/SO/rede)
 //
-// Mistura o módulo `os` nativo com leitura de arquivos do Linux
-// (/sys/class/dmi, /etc/resolv.conf) e comandos (`ip route`).
-// Tudo é best-effort: se algo não existir, volta null (não quebra).
-//
+// Suporta Linux e Windows.
 // As funções de PARSING são puras (texto -> valor), testáveis via TDD.
 // =====================================================================
 
@@ -19,16 +16,31 @@ const execFileAsync = promisify(execFile);
 
 // ---- PARSING (puro / testável) --------------------------------------
 
-// Extrai o gateway padrão da saída de `ip route`.
+// Extrai o gateway padrão da saída de `ip route` (Linux).
 export function parseGateway(ipRouteOutput) {
   const m = ipRouteOutput.match(/default via (\S+)/);
   return m ? m[1] : null;
 }
 
-// Extrai os servidores DNS de um /etc/resolv.conf.
+// Extrai os servidores DNS de um /etc/resolv.conf (Linux).
 export function parseResolvConf(text) {
   const servers = [...text.matchAll(/^\s*nameserver\s+(\S+)/gm)].map((m) => m[1]);
   return servers.length ? servers.join(',') : null;
+}
+
+// Extrai o gateway da saída de Get-NetRoute (Windows PowerShell).
+// A saída é um único IP por linha, ex: "192.168.1.1\r\n"
+export function parseWindowsGateway(psOutput) {
+  const gw = psOutput.trim();
+  return gw && gw !== '0.0.0.0' ? gw : null;
+}
+
+// Extrai DNS da saída de Get-DnsClientServerAddress (Windows PowerShell).
+// A saída tem um IP por linha; deduplica e une por vírgula.
+export function parseWindowsDns(psOutput) {
+  const servers = psOutput.trim().split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const unique = [...new Set(servers)];
+  return unique.length ? unique.join(',') : null;
 }
 
 // ---- LEITURAS DO SISTEMA (best-effort) ------------------------------
@@ -37,49 +49,92 @@ function readFileSafe(p) {
   try { return fs.readFileSync(p, 'utf8').trim(); } catch { return null; }
 }
 
+// Retorna MACs e IPs IPv4 de todas as interfaces não-internas.
 function networkInfo() {
   const ifaces = os.networkInterfaces();
   const macs = new Set();
-  const ips = new Set();
+  const ipv4s = new Set();
   let active = null;
   for (const [nome, addrs] of Object.entries(ifaces)) {
     for (const a of addrs || []) {
       if (a.internal) continue;
       if (a.mac && a.mac !== '00:00:00:00:00:00') macs.add(a.mac);
-      if (a.family === 'IPv4' || a.family === 'IPv6') ips.add(a.address);
-      if (a.family === 'IPv4' && !active) active = { name: nome, mac: a.mac };
+      if (a.family === 'IPv4') {
+        ipv4s.add(a.address);
+        if (!active) active = { name: nome, mac: a.mac };
+      }
     }
   }
   return {
     mac_addresses: [...macs].join(','),
-    local_ips: [...ips].join(','),
+    local_ips: [...ipv4s].join(','),    // IPv4 apenas
     interface_name: active?.name ?? null,
   };
 }
 
 async function getGateway() {
+  if (process.platform === 'win32') {
+    try {
+      const { stdout } = await execFileAsync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        "(Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Where-Object { $_.NextHop -notmatch ':' } | Sort-Object RouteMetric | Select-Object -First 1 -ExpandProperty NextHop)",
+      ]);
+      return parseWindowsGateway(stdout);
+    } catch { return null; }
+  }
   try { return parseGateway((await execFileAsync('ip', ['route'])).stdout); }
   catch { return null; }
 }
 
-function getDnsServers() {
+async function getDnsServers() {
+  if (process.platform === 'win32') {
+    try {
+      const { stdout } = await execFileAsync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        "Get-DnsClientServerAddress -AddressFamily IPv4 | ForEach-Object { $_.ServerAddresses } | Sort-Object | Get-Unique | Where-Object { $_ }",
+      ]);
+      return parseWindowsDns(stdout);
+    } catch { return null; }
+  }
   const text = readFileSafe('/etc/resolv.conf');
   return text ? parseResolvConf(text) : null;
 }
 
-// Serial e modelo via DMI (Linux). product_serial costuma exigir root;
-// caímos para machine-id quando não der.
-function getSerial() {
+async function getSerial() {
+  if (process.platform === 'win32') {
+    try {
+      const { stdout } = await execFileAsync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        "(Get-CimInstance -ClassName Win32_BIOS).SerialNumber",
+      ]);
+      const s = stdout.trim();
+      return s || null;
+    } catch { return null; }
+  }
   return readFileSafe('/sys/class/dmi/id/product_serial')
       || readFileSafe('/etc/machine-id');
 }
-function getModel() {
+
+async function getModel() {
+  if (process.platform === 'win32') {
+    try {
+      const { stdout } = await execFileAsync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        "(Get-CimInstance -ClassName Win32_ComputerSystem).Model",
+      ]);
+      const m = stdout.trim();
+      return m || null;
+    } catch { return null; }
+  }
   return readFileSafe('/sys/class/dmi/id/product_name');
 }
 
 async function getDisk() {
   try {
-    const s = await statfs('/');
+    const root = process.platform === 'win32'
+      ? (process.env.SystemDrive || 'C:') + '\\'
+      : '/';
+    const s = await statfs(root);
     return {
       disk_total_bytes: s.blocks * s.bsize,
       disk_free_bytes: s.bavail * s.bsize,
@@ -111,7 +166,13 @@ export function buildAgentId() {
 // Identidade do agente (tabela `agents`).
 export async function collectIdentity(agentName) {
   const net = networkInfo();
-  const [default_gateway] = [await getGateway()];
+  const [default_gateway, dns_servers, serial_number, model, pub] = await Promise.all([
+    getGateway(),
+    getDnsServers(),
+    getSerial(),
+    getModel(),
+    getPublicNet(),
+  ]);
   return {
     agent_id: buildAgentId(),
     agent_name: agentName || os.hostname(),
@@ -119,12 +180,13 @@ export async function collectIdentity(agentName) {
     os: os.platform(),
     os_version: os.release(),
     arch: os.arch(),
-    serial_number: getSerial(),
-    model: getModel(),
+    serial_number,
+    model,
     mac_addresses: net.mac_addresses,
     local_ips: net.local_ips,
-    dns_servers: getDnsServers(),
+    dns_servers,
     default_gateway,
+    public_ip: pub.public_ip,
   };
 }
 

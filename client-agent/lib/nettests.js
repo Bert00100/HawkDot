@@ -1,16 +1,8 @@
 // =====================================================================
-// HawkDot agent — testes de REDE (ping, dns, http)
+// HawkDot agent — testes de REDE (ping, dns, http, speed)
 //
-// Cada função roda uma ferramenta do sistema e devolve um objeto no
-// formato esperado pela tabela test_results do backend.
-//
-// As funções de PARSING são puras (recebem texto, devolvem objeto), então
-// dá para testá-las via TDD sem precisar de rede.
-//
-// PASSO A PASSO (debug humano):
-//   1. runPing  -> executa `ping` e usa parsePing() para extrair métricas.
-//   2. runDns   -> resolve o domínio (dns nativo do Node) e mede o tempo.
-//   3. runHttp  -> faz um GET e mede tempo total + status HTTP.
+// As funções de PARSING são puras (recebem texto, devolvem objeto),
+// testáveis via TDD sem precisar de rede.
 // =====================================================================
 
 import { execFile } from 'node:child_process';
@@ -24,13 +16,12 @@ const dnsLookup = promisify(dns.lookup);
 
 // Extrai a % de perda de pacotes (funciona em Linux e Windows EN/PT).
 function parseLoss(stdout) {
-  const m = stdout.match(/(\d+(?:\.\d+)?)\s*%\s*(?:packet\s*)?loss/i)   // Linux / Windows EN
-        || stdout.match(/(\d+(?:\.\d+)?)\s*%\s*de\s*perda/i)            // Windows PT
-        || stdout.match(/\((\d+(?:\.\d+)?)\s*%/);                       // "(0% loss)" / "(0% de perda)"
+  const m = stdout.match(/(\d+(?:\.\d+)?)\s*%\s*(?:packet\s*)?loss/i)
+        || stdout.match(/(\d+(?:\.\d+)?)\s*%\s*de\s*perda/i)
+        || stdout.match(/\((\d+(?:\.\d+)?)\s*%/);
   return m ? Number(m[1]) : null;
 }
 
-// Média e desvio-padrão (jitter) de uma lista de números.
 function avg(nums) {
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
@@ -41,10 +32,6 @@ function stddev(nums) {
 }
 
 // Extrai latência média, jitter e perda da saída do `ping`.
-// Estratégia multiplataforma:
-//   1. Se houver a linha "rtt min/avg/max/mdev" (Linux), usa avg + mdev.
-//   2. Senão, calcula a média/jitter dos tempos de cada resposta
-//      ("time=8ms" / "tempo=8ms" / "time<1ms") — cobre Windows EN e PT.
 export function parsePing(stdout) {
   const packet_loss_percent = parseLoss(stdout);
 
@@ -68,26 +55,21 @@ export function parsePing(stdout) {
   return { success, latency_ms, packet_loss_percent, jitter_ms };
 }
 
-// ---- EXECUÇÃO --------------------------------------------------------
+// ---- EXECUÇÃO -------------------------------------------------------
 
-// Monta os argumentos do `ping` conforme o sistema operacional.
 function pingArgs(target, count, timeoutSec) {
   if (process.platform === 'win32') {
-    // Windows: -n contagem (não tem timeout total como o Linux).
     return ['-n', String(count), target];
   }
-  // Linux/Mac: -c contagem, -w timeout total em segundos.
   return ['-c', String(count), '-w', String(timeoutSec), target];
 }
 
-// Executa um ping com `count` pacotes e timeout total em segundos.
 export async function runPing({ name, target }, count = 3, timeoutSec = 5) {
   const base = { type: 'ping', name, target };
   try {
     const { stdout } = await execFileAsync('ping', pingArgs(target, count, timeoutSec));
     return { ...base, ...parsePing(stdout) };
   } catch (err) {
-    // ping retorna código != 0 quando há perda total; ainda há stdout útil.
     const stdout = err.stdout || '';
     const parsed = parsePing(stdout);
     return {
@@ -100,7 +82,6 @@ export async function runPing({ name, target }, count = 3, timeoutSec = 5) {
   }
 }
 
-// Resolve um domínio e mede o tempo de resolução.
 export async function runDns({ name, target }) {
   const base = { type: 'dns', name, target };
   const start = performance.now();
@@ -117,7 +98,6 @@ export async function runDns({ name, target }) {
   }
 }
 
-// Faz um GET e mede tempo total + status HTTP.
 export async function runHttp({ name, target }, timeoutMs = 8000) {
   const base = { type: 'http', name, target };
   const start = performance.now();
@@ -138,12 +118,43 @@ export async function runHttp({ name, target }, timeoutMs = 8000) {
   }
 }
 
+// Baixa `target` e mede throughput em Mbps.
+// Devolve os campos do tipo 'speed' da tabela test_results.
+export async function runSpeedTest({ name, target, speed_kind = 'internet' }, timeoutMs = 15000) {
+  const base = { type: 'speed', name, target, speed_kind };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const start = performance.now();
+  try {
+    const res = await fetch(target, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buffer = await res.arrayBuffer();
+    const elapsed_ms = performance.now() - start;
+    const bytes = buffer.byteLength;
+    const throughput_mbps = Number(((bytes * 8) / (elapsed_ms / 1000) / 1_000_000).toFixed(2));
+    return {
+      ...base,
+      success: true,
+      throughput_mbps,
+      bytes_transferred: bytes,
+      total_time_ms: Number(elapsed_ms.toFixed(2)),
+    };
+  } catch {
+    return { ...base, success: false, throughput_mbps: null, bytes_transferred: null, total_time_ms: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Roda todos os testes definidos na config e devolve um array achatado.
-export async function runAllTests(targets) {
+// options.includeSpeed=false pula os speed tests (para ciclos rápidos).
+export async function runAllTests(targets, options = {}) {
+  const { includeSpeed = true } = options;
   const jobs = [
-    ...(targets.ping || []).map((t) => runPing(t)),
-    ...(targets.dns || []).map((t) => runDns(t)),
-    ...(targets.http || []).map((t) => runHttp(t)),
+    ...(targets.ping  || []).map((t) => runPing(t)),
+    ...(targets.dns   || []).map((t) => runDns(t)),
+    ...(targets.http  || []).map((t) => runHttp(t)),
+    ...(includeSpeed ? (targets.speed || []).map((t) => runSpeedTest(t)) : []),
   ];
   return Promise.all(jobs);
 }

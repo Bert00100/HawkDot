@@ -2,6 +2,7 @@
   "backendUrl": "http://localhost:3000",
   "agentName": "",
   "intervalSeconds": 60,
+  "speedTestEvery": 5,
   "targets": {
     "ping": [
       { "name": "Cloudflare", "target": "1.1.1.1" },
@@ -13,6 +14,9 @@
     ],
     "http": [
       { "name": "rota361 site", "target": "https://rota361.com.br" }
+    ],
+    "speed": [
+      { "name": "VPS Download", "target": "http://localhost:3000/api/speed-test?bytes=1000000", "speed_kind": "internet" }
     ]
   }
 }

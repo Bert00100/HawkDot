@@ -4,7 +4,8 @@
 //
 // O que ele faz (a cada ciclo):
 //   1. Monta a identidade da máquina (agent_id estável).
-//   2. Roda os testes de rede (ping/dns/http), incluindo rota361.com.br.
+//   2. Roda os testes de rede (ping/dns/http a cada ciclo;
+//      speed test a cada `speedTestEvery` ciclos — padrão: 5).
 //   3. Coleta um snapshot do sistema (CPU/memória/rede).
 //   4. Envia tudo para o backend em POST /api/collect.
 //
@@ -12,7 +13,7 @@
 //   node agent.js            -> roda em loop (a cada intervalSeconds)
 //   node agent.js --once     -> roda UMA coleta e sai (usado no instalador)
 //
-// Config: caminho em HAWKDOT_CONFIG ou ./config.json (veja config.example.json)
+// Config: caminho em HAWKDOT_CONFIG ou ./config.json
 // =====================================================================
 
 import fs from 'node:fs';
@@ -36,7 +37,6 @@ function loadConfig() {
   return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
 }
 
-// Contador sequencial de coletas, persistido entre execuções.
 function nextCollectionNumber() {
   let n = 0;
   try { n = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8')).collection_number || 0; } catch {}
@@ -46,15 +46,18 @@ function nextCollectionNumber() {
 }
 
 // Executa um ciclo completo de coleta e envio.
-async function collectOnce(config) {
+// cycleNumber controla se o speed test roda nesse ciclo.
+async function collectOnce(config, cycleNumber = 1) {
   // 1) identidade
   const agent = await collectIdentity(config.agentName);
   log(`coletando como ${agent.agent_id} (${agent.hostname})`);
 
-  // 2) testes de rede
-  const test_results = await runAllTests(config.targets || {});
+  // 2) testes de rede (speed test a cada N ciclos)
+  const speedTestEvery = config.speedTestEvery || 5;
+  const includeSpeed = cycleNumber % speedTestEvery === 0;
+  const test_results = await runAllTests(config.targets || {}, { includeSpeed });
   const okCount = test_results.filter((t) => t.success).length;
-  log(`testes de rede: ${okCount}/${test_results.length} com sucesso`);
+  log(`testes de rede: ${okCount}/${test_results.length} com sucesso${includeSpeed ? ' (+ speed test)' : ''}`);
 
   // 3) snapshot do sistema
   const system_snapshot = await collectSnapshot();
@@ -86,15 +89,18 @@ async function main() {
   log(`HawkDot agent iniciado (backend=${config.backendUrl}, once=${once})`);
 
   if (once) {
-    await collectOnce(config);
+    // No modo --once, roda o speed test (ciclo 5 = múltiplo de 5).
+    await collectOnce(config, 5);
     return;
   }
 
   // Loop contínuo. Erros de um ciclo não derrubam o agente.
   const intervalMs = (config.intervalSeconds || 60) * 1000;
+  let cycleNumber = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    try { await collectOnce(config); }
+    cycleNumber++;
+    try { await collectOnce(config, cycleNumber); }
     catch (err) { log(`ERRO no ciclo: ${err.message}`); }
     await new Promise((r) => setTimeout(r, intervalMs));
   }

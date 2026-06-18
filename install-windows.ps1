@@ -110,7 +110,14 @@ $cfg = Get-Content (Join-Path $InstallDir "config.example.json") -Raw | ConvertF
 $cfg.backendUrl      = $BackendUrl
 $cfg.agentName       = $Name
 $cfg.intervalSeconds = $Interval
-$cfg | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $InstallDir "config.json") -Encoding UTF8
+# Atualiza a URL do speed test para apontar para o backend configurado.
+if ($cfg.targets.speed) {
+  foreach ($st in $cfg.targets.speed) {
+    $st.target = $st.target -replace [regex]::Escape('http://localhost:3000'), $BackendUrl
+  }
+}
+$cfgJson = $cfg | ConvertTo-Json -Depth 10
+[System.IO.File]::WriteAllText((Join-Path $InstallDir "config.json"), $cfgJson, [System.Text.UTF8Encoding]::new($false))
 Write-Host "    config.json criado."
 
 Write-Step "[4/5] Registrando a maquina (coleta de teste)..."
