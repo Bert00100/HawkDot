@@ -34,6 +34,13 @@ export function fmtPct(v) {
 export function fmtMbps(v) {
   return v == null ? '—' : `${Number(v).toFixed(1)} Mbps`;
 }
+export function fmtBytes(v) {
+  if (v == null) return '—';
+  const n = Number(v);
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} MB`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)} KB`;
+  return `${n} B`;
+}
 export function fmtDate(v) {
   if (!v) return '—';
   const d = new Date(v);

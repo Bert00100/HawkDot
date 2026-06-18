@@ -1,18 +1,13 @@
 // =====================================================================
 // HawkDot backend — serviço do DASHBOARD
-//
-// Junta os dados crus (repositório) com a lógica de saúde (health.js)
-// para produzir exatamente o que cada tela do painel precisa.
 // =====================================================================
 
 import * as repo from '../repositories/dashboardRepository.js';
 import * as agentsRepo from '../repositories/agentsRepository.js';
 import { summarizeTests, classifyHealth, STATUS } from '../lib/health.js';
 
-// Mapa de períodos aceitos -> intervalo SQL seguro (não usamos input cru).
 const PERIODS = { '24h': '24 hours', '7d': '7 days', '30d': '30 days' };
 
-// Booleans de conectividade derivados dos testes de uma coleta.
 function connectivityFlags(tests) {
   const ext = tests.filter((t) => (t.type === 'ping' || t.type === 'http') && t.speed_kind !== 'internal');
   const internet = ext.length ? ext.some((t) => t.success === true) : null;
@@ -25,7 +20,6 @@ function connectivityFlags(tests) {
   return { internet, linkLocal, servicesOk };
 }
 
-// Monta uma linha da tabela "Resultado por Rede" para um agente + sua última coleta.
 async function buildNetworkRow(latest) {
   const tests = await repo.getTestResults(latest.collection_id);
   const metrics = summarizeTests(tests);
@@ -46,7 +40,6 @@ async function buildNetworkRow(latest) {
   };
 }
 
-// Cards do topo: total de agentes + contagem por status.
 export async function getSummary() {
   const agents = await agentsRepo.listAgents();
   const latest = await repo.latestCollectionPerAgent();
@@ -61,48 +54,57 @@ export async function getSummary() {
   };
 }
 
-// Tabela "Resultado por Rede".
 export async function getNetworks() {
   const latest = await repo.latestCollectionPerAgent();
   return Promise.all(latest.map(buildNetworkRow));
 }
 
-// Converte bytes -> GB (1 casa decimal). Devolve null se não houver dado.
 function toGB(bytes) {
   return bytes == null ? null : Number((Number(bytes) / 1024 ** 3).toFixed(1));
 }
 
-// Monta a seção "Identidade da Máquina" a partir do cadastro do agente.
+// Extrai o primeiro IPv4 de uma string de IPs separados por vírgula.
+function firstIpv4(ips) {
+  if (!ips) return null;
+  return ips.split(',').map((s) => s.trim()).find((ip) => /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) ?? null;
+}
+
+// Primeiro MAC da lista separada por vírgula.
+function firstMac(macs) {
+  if (!macs) return null;
+  return macs.split(',')[0].trim() || null;
+}
+
 function buildIdentidade(agent, snapshot) {
   return {
-    agente: agent.agent_name,
-    hostname: agent.hostname,
-    serial: agent.serial_number,
-    ip_local: agent.local_ips,
-    gateway: agent.default_gateway,
-    dns: agent.dns_servers,
-    cpu: snapshot?.cpu_model ?? null,
-    modelo: agent.model,
+    agente:     agent.agent_name,
+    hostname:   agent.hostname,
+    serial:     agent.serial_number,
+    mac:        firstMac(agent.mac_addresses),
+    ip_local:   firstIpv4(agent.local_ips),
+    ip_publico: agent.public_ip ?? snapshot?.public_ip ?? null,
+    gateway:    agent.default_gateway,
+    dns:        agent.dns_servers,
+    cpu:        snapshot?.cpu_model ?? null,
+    modelo:     agent.model,
   };
 }
 
-// Monta a seção "Resumo" (cards) a partir do agente + último snapshot.
 function buildResumo(agent, snapshot, status) {
   const arch = agent.arch ? ` (${agent.arch})` : '';
   return {
     status,
-    serial: agent.serial_number,
-    usuario: `${agent.os ?? '—'}${arch}`,
-    operadora: snapshot?.isp ?? null,
-    ip_publico: snapshot?.public_ip ?? null,
-    ram_usada_gb: toGB(snapshot?.memory_used_bytes),
-    ram_total_gb: toGB(snapshot?.memory_physical_bytes),
+    serial:        agent.serial_number,
+    usuario:       `${agent.os ?? '—'}${arch}`,
+    operadora:     snapshot?.isp ?? null,
+    ip_publico:    agent.public_ip ?? snapshot?.public_ip ?? null,
+    ram_usada_gb:  toGB(snapshot?.memory_used_bytes),
+    ram_total_gb:  toGB(snapshot?.memory_physical_bytes),
     disco_livre_gb: toGB(snapshot?.disk_free_bytes),
     disco_total_gb: toGB(snapshot?.disk_total_bytes),
   };
 }
 
-// Bloco 1 — detalhe/estado atual da máquina (identidade + resumo).
 export async function getMachineDetail(agentDbId) {
   const agent = await agentsRepo.getAgent(agentDbId);
   if (!agent) return null;
@@ -132,7 +134,6 @@ export async function getMachineDetail(agentDbId) {
   };
 }
 
-// Bloco 2 — testes executados na última coleta.
 export async function getMachineTests(agentDbId) {
   const latest = (await repo.latestCollectionPerAgent())
     .find((l) => l.agent_id === Number(agentDbId));
@@ -140,7 +141,6 @@ export async function getMachineTests(agentDbId) {
   return repo.getTestResults(latest.collection_id);
 }
 
-// Bloco 3 — histórico por período. Lança erro se o período for inválido.
 export async function getMachineHistory(agentDbId, period) {
   const interval = PERIODS[period];
   if (!interval) {
@@ -149,7 +149,6 @@ export async function getMachineHistory(agentDbId, period) {
     throw err;
   }
   const rows = await repo.getHistory(agentDbId, interval);
-  // anexa o status de cada ponto do histórico
   return rows.map((r) => {
     const metrics = {
       avgLatencyMs: r.avg_latency_ms != null ? Number(r.avg_latency_ms) : null,
@@ -169,7 +168,6 @@ export async function getMachineHistory(agentDbId, period) {
   });
 }
 
-// Bloco 4 — interfaces de rede.
 export async function getMachineInterfaces(agentDbId) {
   return repo.getInterfaces(agentDbId);
 }

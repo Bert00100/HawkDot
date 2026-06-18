@@ -1,19 +1,11 @@
 // =====================================================================
 // HawkDot frontend — Página de DETALHE da máquina
 //
-// Seções: Identidade · Resumo (cards) · Gráficos de barras · Testes Atuais.
-//
-// PASSO A PASSO (debug humano):
-//   1. Lê o ?id= da URL (id interno do agente).
-//   2. carregaDetalhe -> /dashboard/machines/:id  (identidade + resumo)
-//   3. carregaTestes  -> /dashboard/machines/:id/tests
-//   4. carregaGraficos-> /dashboard/machines/:id/history?period=  (séries)
-//   5. Atualiza identidade/resumo/testes a cada 10s; gráficos recarregam
-//      junto e ao trocar o período.
+// Seções: Identidade · Resumo · Speed Test · Gráficos · Testes Atuais.
 // =====================================================================
 
 import {
-  api, statusBadge, fmtMs, fmtPct, fmtMbps, fmtDate, escapeHtml, getQueryId,
+  api, statusBadge, fmtMs, fmtPct, fmtMbps, fmtBytes, fmtDate, escapeHtml, getQueryId,
 } from './api.js';
 import { renderBarChart } from './charts.js';
 
@@ -40,14 +32,16 @@ async function carregaDetalhe() {
   // Identidade
   const i = d.identidade;
   document.getElementById('identidade').innerHTML = [
-    kv('Agente', ou(i.agente)),
-    kv('Hostname', ou(i.hostname)),
-    kv('Serial', ou(i.serial)),
-    kv('IP Local', ou(i.ip_local)),
-    kv('Gateway', ou(i.gateway)),
-    kv('DNS', ou(i.dns)),
-    kv('CPU', ou(i.cpu)),
-    kv('Modelo', ou(i.modelo)),
+    kv('Agente',     ou(i.agente)),
+    kv('Hostname',   ou(i.hostname)),
+    kv('Serial',     ou(i.serial)),
+    kv('MAC',        ou(i.mac)),
+    kv('IP Interno', ou(i.ip_local)),
+    kv('IP Público', ou(i.ip_publico)),
+    kv('Gateway',    ou(i.gateway)),
+    kv('DNS',        ou(i.dns)),
+    kv('CPU',        ou(i.cpu)),
+    kv('Modelo',     ou(i.modelo)),
   ].join('');
 
   // Resumo
@@ -55,11 +49,9 @@ async function carregaDetalhe() {
   const ram = r.ram_total_gb != null ? `${r.ram_usada_gb ?? '?'} / ${r.ram_total_gb} GB` : '—';
   const disco = r.disco_total_gb != null ? `${r.disco_livre_gb ?? '?'} / ${r.disco_total_gb} GB` : '—';
   document.getElementById('resumo').innerHTML = [
-    kv('Status', statusBadge(r.status)),
-    kv('Serial', ou(r.serial)),
-    kv('Usuário', ou(r.usuario)),
+    kv('Status',    statusBadge(r.status)),
+    kv('OS',        ou(r.usuario)),
     kv('Operadora', ou(r.operadora)),
-    kv('IP Público', ou(r.ip_publico)),
     kv('RAM Usada', ram),
     kv('Disco Livre', disco),
   ].join('');
@@ -67,8 +59,29 @@ async function carregaDetalhe() {
 
 async function carregaTestes() {
   const tests = await api.get(`/dashboard/machines/${id}/tests`);
+
+  // --- Seção Speed Test ---
+  const speedTests = tests.filter((t) => t.type === 'speed');
+  const speedEl = document.getElementById('speed-test');
+  if (speedTests.length) {
+    speedEl.innerHTML = speedTests.map((t) => [
+      kv('Destino',    ou(t.name)),
+      kv('Throughput', t.throughput_mbps != null ? fmtMbps(t.throughput_mbps) : '—'),
+      kv('Status',     statusBadge(t.success === true ? 'bom' : 'critico')),
+      kv('Tempo',      fmtMs(t.total_time_ms)),
+      kv('Baixado',    fmtBytes(t.bytes_transferred)),
+      kv('Tipo',       ou(t.speed_kind)),
+    ].join('')).join('');
+  } else {
+    speedEl.innerHTML = '<div class="empty">Speed test não executado ainda (roda a cada 5 ciclos).</div>';
+  }
+
+  // --- Tabela de Testes Atuais ---
   const tbody = document.getElementById('testes');
-  if (!tests.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">Sem testes.</td></tr>'; return; }
+  if (!tests.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Sem testes.</td></tr>';
+    return;
+  }
   tbody.innerHTML = tests.map((t) => {
     const tempo = t.latency_ms ?? t.response_time_ms ?? t.total_time_ms ?? t.connect_time_ms;
     return `<tr>
@@ -83,21 +96,19 @@ async function carregaTestes() {
   }).join('');
 }
 
-// Coluna "Detalhe": IP resolvido (dns) ou código HTTP, conforme o tipo.
 function detalheTeste(t) {
   switch (t.type) {
-    case 'dns': return t.resolved_address ? `resolveu ${escapeHtml(t.resolved_address)}` : '';
-    case 'http': return t.http_status_code ? `HTTP ${t.http_status_code}` : '';
+    case 'dns':   return t.resolved_address ? `resolveu ${escapeHtml(t.resolved_address)}` : '';
+    case 'http':  return t.http_status_code ? `HTTP ${t.http_status_code}` : '';
     case 'speed': return t.throughput_mbps != null ? fmtMbps(t.throughput_mbps) : '';
     case 'route': return t.route_last_hop ? `${t.route_hop_count} hops → ${escapeHtml(t.route_last_hop)}` : '';
-    case 'ping': return t.jitter_ms != null ? `jitter ${fmtMs(t.jitter_ms)}` : '';
+    case 'ping':  return t.jitter_ms != null ? `jitter ${fmtMs(t.jitter_ms)}` : '';
     default: return '';
   }
 }
 
 async function carregaGraficos() {
   const rows = await api.get(`/dashboard/machines/${id}/history?period=${periodoAtual}`);
-  // a API devolve do mais novo para o mais antigo; gráficos leem do antigo p/ novo
   const pontos = [...rows].reverse();
   const labels = pontos.map((p) => fmtDate(p.quando));
 
@@ -114,7 +125,6 @@ async function carregaGraficos() {
     { color: '#a32430', unit: '' });
 }
 
-// Botões de período controlam os gráficos.
 document.getElementById('filtros').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;

@@ -31,6 +31,15 @@ export function createApp() {
   // Healthcheck do serviço (responde mesmo sem banco populado).
   app.get('/api/health', (req, res) => res.json({ ok: true, service: 'hawkdot-backend' }));
 
+  // Speed test: devolve N bytes nulos para o agente medir throughput de download.
+  // Máximo 5 MB por requisição para não saturar a VPS.
+  app.get('/api/speed-test', (req, res) => {
+    const bytes = Math.min(parseInt(req.query.bytes, 10) || 1_000_000, 5_000_000);
+    res.set('Content-Type', 'application/octet-stream');
+    res.set('Cache-Control', 'no-store');
+    res.end(Buffer.alloc(bytes));
+  });
+
   app.use('/api/collect', collectRouter);
   app.use('/api/agents', agentsRouter);
   app.use('/api/dashboard', dashboardRouter);
