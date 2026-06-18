@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HawkDot — Detalhe da Máquina</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1 id="titulo">🦅 HawkDot — Detalhe</h1>
+      <div class="sub" id="subtitulo">—</div>
+    </div>
+    <a href="index.html">← Voltar ao painel</a>
+  </header>
+
+  <main>
+    <!-- Seção: Identidade da Máquina -->
+    <h2>🪪 Identidade da Máquina</h2>
+    <div class="detail-grid" id="identidade"></div>
+
+    <!-- Seção: Resumo (cards) -->
+    <h2>📊 Resumo</h2>
+    <div class="detail-grid" id="resumo"></div>
+
+    <!-- Seção: Gráficos -->
+    <h2>📈 Gráficos
+      <span class="filtros" id="filtros">
+        <button data-period="24h" class="ativo">24 horas</button>
+        <button data-period="7d">7 dias</button>
+        <button data-period="30d">30 dias</button>
+      </span>
+    </h2>
+    <div class="charts-grid">
+      <div class="chart-card">
+        <div class="chart-title">Latência máxima (ms)</div>
+        <div id="chart-latencia"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Speed test (Mbps)</div>
+        <div id="chart-speed"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Perda / falhas</div>
+        <div id="chart-perda"></div>
+      </div>
+    </div>
+
+    <!-- Seção: Testes Atuais -->
+    <h2>🧪 Testes Atuais <span class="muted">(última coleta)</span></h2>
+    <div class="tabela-wrap">
+      <table>
+        <thead>
+          <tr><th>Tipo</th><th>Nome</th><th>Alvo</th><th>Status</th><th>Tempo</th><th>Perda</th><th>Detalhe</th></tr>
+        </thead>
+        <tbody id="testes"><tr><td colspan="7" class="empty">Carregando…</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script type="module" src="js/machine.js"></script>
+</body>
+</html>

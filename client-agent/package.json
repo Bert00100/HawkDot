@@ -1,0 +1,12 @@
+{
+  "name": "hawkdot-agent",
+  "version": "0.1.0",
+  "description": "HawkDot — agente cliente (coleta qualidade de rede e envia ao backend)",
+  "type": "module",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js",
+    "once": "node agent.js --once",
+    "test": "node --test"
+  }
+}

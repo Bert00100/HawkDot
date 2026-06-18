@@ -1,16 +1,47 @@
 services:
   postgres:
-    image: postgres:16
+    image: postgres:${POSTGRES_VERSION:-17}
     container_name: hawkdot_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: hawkdot
-      POSTGRES_PASSWORD: TROQUE_ESTA_SENHA
-      POSTGRES_DB: hawkdot_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
+      # Tabelas PADRÃO do banco: rodam automaticamente na criação do
+      # container (apenas na 1ª vez, com o volume vazio). Alterações
+      # posteriores ficam em database/migrations/ (ver database/migrate.sh).
+      - ./database/init:/docker-entrypoint-initdb.d:ro
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - hawkdot_network
+
+  # Painel: backend Node.js (ingestão + API + dashboards) + frontend estático.
+  panel:
+    build:
+      context: ./panel
+      dockerfile: Dockerfile
+    container_name: hawkdot_panel
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      PGHOST: postgres            # nome do serviço na rede do compose
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+    ports:
+      - "${PANEL_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - hawkdot_network
 

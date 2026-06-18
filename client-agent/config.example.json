@@ -1,0 +1,18 @@
+{
+  "backendUrl": "http://localhost:3000",
+  "agentName": "",
+  "intervalSeconds": 60,
+  "targets": {
+    "ping": [
+      { "name": "Cloudflare", "target": "1.1.1.1" },
+      { "name": "Google", "target": "8.8.8.8" },
+      { "name": "rota361", "target": "rota361.com.br" }
+    ],
+    "dns": [
+      { "name": "rota361 DNS", "target": "rota361.com.br" }
+    ],
+    "http": [
+      { "name": "rota361 site", "target": "https://rota361.com.br" }
+    ]
+  }
+}

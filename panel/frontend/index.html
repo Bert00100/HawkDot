@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HawkDot — Painel Principal</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>🦅 HawkDot Collector</h1>
+      <div class="sub">Painel Principal — Saúde Geral das Redes</div>
+    </div>
+    <div class="muted" id="atualizado" style="color:var(--azul-claro)">—</div>
+  </header>
+
+  <main>
+    <!-- Cards de resumo -->
+    <section class="cards" id="cards">
+      <div class="card"><div class="label">Agentes</div><div class="value" id="c-agentes">—</div></div>
+      <div class="card bom"><div class="label">Redes boas</div><div class="value" id="c-boas">—</div></div>
+      <div class="card atencao"><div class="label">Atenção</div><div class="value" id="c-atencao">—</div></div>
+      <div class="card critico"><div class="label">Críticas</div><div class="value" id="c-criticas">—</div></div>
+    </section>
+
+    <h2>🖥️ Resultado por Rede <span class="muted">(atualiza a cada 10s)</span></h2>
+    <div class="tabela-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Rede / Máquina</th><th>Usuário</th><th>Status</th><th>Diagnóstico</th>
+            <th>Latência</th><th>Perda</th><th>Serviços</th><th>Internet</th>
+            <th>Link local</th><th>Última coleta</th>
+          </tr>
+        </thead>
+        <tbody id="linhas">
+          <tr><td colspan="10" class="empty">Carregando…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <script type="module" src="js/dashboard.js"></script>
+</body>
+</html>

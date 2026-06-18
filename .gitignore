@@ -1,0 +1,27 @@
+# Variáveis de ambiente (NUNCA commitar dados reais)
+.env
+*.env
+!.env.example
+
+# Dados reais do Postgres (NUNCA vai pro Git)
+postgres-data/
+
+# Dependências
+node_modules/
+panel/frontend/node_modules/
+panel/backend/node_modules/
+
+# Build / binários Go
+services-go/**/bin/
+client-agent/**/bin/
+*.exe
+*.out
+
+# Arquivos de runtime do agente (gerados pelo install.sh)
+client-agent/config.json
+client-agent/state.json
+
+# Logs e temporários
+*.log
+tmp/
+.DS_Store
