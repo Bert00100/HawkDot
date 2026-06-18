@@ -22,30 +22,69 @@ const dnsLookup = promisify(dns.lookup);
 
 // ---- PARSING (puro / testável) --------------------------------------
 
-// Extrai latência média, jitter e perda de pacotes da saída do `ping` (Linux).
+// Extrai a % de perda de pacotes (funciona em Linux e Windows EN/PT).
+function parseLoss(stdout) {
+  const m = stdout.match(/(\d+(?:\.\d+)?)\s*%\s*(?:packet\s*)?loss/i)   // Linux / Windows EN
+        || stdout.match(/(\d+(?:\.\d+)?)\s*%\s*de\s*perda/i)            // Windows PT
+        || stdout.match(/\((\d+(?:\.\d+)?)\s*%/);                       // "(0% loss)" / "(0% de perda)"
+  return m ? Number(m[1]) : null;
+}
+
+// Média e desvio-padrão (jitter) de uma lista de números.
+function avg(nums) {
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+function stddev(nums) {
+  if (nums.length < 2) return 0;
+  const m = avg(nums);
+  return Math.sqrt(avg(nums.map((n) => (n - m) ** 2)));
+}
+
+// Extrai latência média, jitter e perda da saída do `ping`.
+// Estratégia multiplataforma:
+//   1. Se houver a linha "rtt min/avg/max/mdev" (Linux), usa avg + mdev.
+//   2. Senão, calcula a média/jitter dos tempos de cada resposta
+//      ("time=8ms" / "tempo=8ms" / "time<1ms") — cobre Windows EN e PT.
 export function parsePing(stdout) {
-  const lossMatch = stdout.match(/(\d+(?:\.\d+)?)%\s*packet loss/i);
-  const rttMatch = stdout.match(/=\s*[\d.]+\/([\d.]+)\/[\d.]+\/([\d.]+)\s*ms/);
+  const packet_loss_percent = parseLoss(stdout);
 
-  const packet_loss_percent = lossMatch ? Number(lossMatch[1]) : null;
-  const latency_ms = rttMatch ? Number(rttMatch[1]) : null;
-  const jitter_ms = rttMatch ? Number(rttMatch[2]) : null;
+  const rtt = stdout.match(/=\s*[\d.]+\/([\d.]+)\/[\d.]+\/([\d.]+)\s*ms/);
+  let latency_ms = null;
+  let jitter_ms = null;
 
-  // sucesso = conseguiu medir latência e perda < 100%
+  if (rtt) {
+    latency_ms = Number(rtt[1]);
+    jitter_ms = Number(rtt[2]);
+  } else {
+    const times = [...stdout.matchAll(/(?:time|tempo)[=<]\s*([\d.]+)\s*ms/gi)]
+      .map((m) => Number(m[1]));
+    if (times.length) {
+      latency_ms = Number(avg(times).toFixed(2));
+      jitter_ms = Number(stddev(times).toFixed(2));
+    }
+  }
+
   const success = latency_ms != null && (packet_loss_percent == null || packet_loss_percent < 100);
-
   return { success, latency_ms, packet_loss_percent, jitter_ms };
 }
 
 // ---- EXECUÇÃO --------------------------------------------------------
 
+// Monta os argumentos do `ping` conforme o sistema operacional.
+function pingArgs(target, count, timeoutSec) {
+  if (process.platform === 'win32') {
+    // Windows: -n contagem (não tem timeout total como o Linux).
+    return ['-n', String(count), target];
+  }
+  // Linux/Mac: -c contagem, -w timeout total em segundos.
+  return ['-c', String(count), '-w', String(timeoutSec), target];
+}
+
 // Executa um ping com `count` pacotes e timeout total em segundos.
 export async function runPing({ name, target }, count = 3, timeoutSec = 5) {
   const base = { type: 'ping', name, target };
   try {
-    const { stdout } = await execFileAsync(
-      'ping', ['-c', String(count), '-w', String(timeoutSec), target],
-    );
+    const { stdout } = await execFileAsync('ping', pingArgs(target, count, timeoutSec));
     return { ...base, ...parsePing(stdout) };
   } catch (err) {
     // ping retorna código != 0 quando há perda total; ainda há stdout útil.

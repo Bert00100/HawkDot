@@ -47,6 +47,51 @@ test('parsePing: perda parcial => sucesso com perda registrada', () => {
   assert.equal(r.latency_ms, 20);
 });
 
+// ---- Saídas do ping no WINDOWS (formato diferente e localizado) ----
+
+const PING_WIN_EN = `Pinging rota361.com.br [104.21.52.120] with 32 bytes of data:
+Reply from 104.21.52.120: bytes=32 time=7ms TTL=57
+Reply from 104.21.52.120: bytes=32 time=9ms TTL=57
+
+Ping statistics for 104.21.52.120:
+    Packets: Sent = 2, Received = 2, Lost = 0 (0% loss),
+Approximate round trip times in milli-seconds:
+    Minimum = 7ms, Maximum = 9ms, Average = 8ms`;
+
+const PING_WIN_PT = `Disparando rota361.com.br [104.21.52.120] com 32 bytes de dados:
+Resposta de 104.21.52.120: bytes=32 tempo=10ms TTL=57
+Resposta de 104.21.52.120: bytes=32 tempo=20ms TTL=57
+
+Estatisticas do Ping para 104.21.52.120:
+    Pacotes: Enviados = 2, Recebidos = 2, Perdidos = 0 (0% de perda),`;
+
+const PING_WIN_LOSS = `Disparando 10.0.0.9 com 32 bytes de dados:
+Esgotado o tempo limite do pedido.
+
+Estatisticas do Ping para 10.0.0.9:
+    Pacotes: Enviados = 2, Recebidos = 0, Perdidos = 2 (100% de perda),`;
+
+test('parsePing (Windows EN): média dos tempos e perda', () => {
+  const r = parsePing(PING_WIN_EN);
+  assert.equal(r.success, true);
+  assert.equal(r.latency_ms, 8);          // média de 7 e 9
+  assert.equal(r.packet_loss_percent, 0);
+});
+
+test('parsePing (Windows PT): tempo= e "% de perda"', () => {
+  const r = parsePing(PING_WIN_PT);
+  assert.equal(r.success, true);
+  assert.equal(r.latency_ms, 15);         // média de 10 e 20
+  assert.equal(r.packet_loss_percent, 0);
+});
+
+test('parsePing (Windows): perda total => falha e 100%', () => {
+  const r = parsePing(PING_WIN_LOSS);
+  assert.equal(r.success, false);
+  assert.equal(r.packet_loss_percent, 100);
+  assert.equal(r.latency_ms, null);
+});
+
 // ---- Testes de rede REAIS (pulam se a máquina estiver offline) ----
 
 test('runPing real no rota361.com.br responde', async () => {
