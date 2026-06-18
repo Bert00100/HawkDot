@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: hawkdot_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hawkdot
+      POSTGRES_PASSWORD: TROQUE_ESTA_SENHA
+      POSTGRES_DB: hawkdot_db
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - hawkdot_network
+
+networks:
+  hawkdot_network:
+    driver: bridge
